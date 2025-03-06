@@ -97,6 +97,16 @@ New checks
   Finds unintended character output from ``unsigned char`` and ``signed char`` to an
   ``ostream``.
 
+- New :doc:`readability-prevent-ibex-doublemath-sametime
+  <clang-tidy/checks/readability/prevent-ibex-doublemath-sametime>` check.
+
+  FIXME: Write a short description.
+
+- New :doc:`readability-prevent-ibex-float-math-in-same-line
+  <clang-tidy/checks/readability/prevent-ibex-float-math-in-same-line>` check.
+
+  FIXME: Write a short description.
+
 - New :doc:`readability-prevent-using-ibex
   <clang-tidy/checks/readability/prevent-using-ibex>` check.
 

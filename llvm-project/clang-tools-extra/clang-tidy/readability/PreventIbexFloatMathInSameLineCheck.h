@@ -1,4 +1,4 @@
-//===--- PreventUsingIbexCheck.h - clang-tidy -------------------*- C++ -*-===//
+//===--- PreventIbexFloatMathInSameLineCheck.h - clang-tidy -----*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,21 +6,20 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_PREVENTUSINGIBEXCHECK_H
-#define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_PREVENTUSINGIBEXCHECK_H
+#ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_PREVENTIBEXFLOATMATHINSAMELINECHECK_H
+#define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_PREVENTIBEXFLOATMATHINSAMELINECHECK_H
 
 #include "../ClangTidyCheck.h"
 
 namespace clang::tidy::readability {
 
-/// This aims to prevent ibex aliasing, so that people and other tidy checks can catch
-/// rounding problems in ibex and float sections
+/// This aims to prevent float math inside ibex calls
 ///
 /// For the user-facing documentation see:
-/// http://clang.llvm.org/extra/clang-tidy/checks/readability/prevent-using-ibex.html
-class PreventUsingIbexCheck : public ClangTidyCheck {
+/// http://clang.llvm.org/extra/clang-tidy/checks/readability/prevent-ibex-float-math-in-same-line.html
+class PreventIbexFloatMathInSameLineCheck : public ClangTidyCheck {
 public:
-  PreventUsingIbexCheck(StringRef Name, ClangTidyContext *Context)
+  PreventIbexFloatMathInSameLineCheck(StringRef Name, ClangTidyContext *Context)
       : ClangTidyCheck(Name, Context) {}
   void registerMatchers(ast_matchers::MatchFinder *Finder) override;
   void check(const ast_matchers::MatchFinder::MatchResult &Result) override;
@@ -31,4 +30,4 @@ public:
 
 } // namespace clang::tidy::readability
 
-#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_PREVENTUSINGIBEXCHECK_H
+#endif // LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_READABILITY_PREVENTIBEXFLOATMATHINSAMELINECHECK_H

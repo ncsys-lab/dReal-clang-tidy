@@ -38,6 +38,7 @@
 #include "NamedParameterCheck.h"
 #include "NonConstParameterCheck.h"
 #include "OperatorsRepresentationCheck.h"
+#include "PreventIbexFloatMathInSameLineCheck.h"
 #include "PreventUsingIbexCheck.h"
 #include "QualifiedAutoCheck.h"
 #include "RedundantAccessSpecifiersCheck.h"
@@ -109,6 +110,8 @@ public:
         "readability-implicit-bool-conversion");
     CheckFactories.registerCheck<MathMissingParenthesesCheck>(
         "readability-math-missing-parentheses");
+    CheckFactories.registerCheck<PreventIbexFloatMathInSameLineCheck>(
+        "readability-prevent-ibex-float-math-in-same-line");
     CheckFactories.registerCheck<PreventUsingIbexCheck>(
         "readability-prevent-using-ibex");
     CheckFactories.registerCheck<RedundantInlineSpecifierCheck>(

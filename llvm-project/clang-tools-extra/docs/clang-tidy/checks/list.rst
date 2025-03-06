@@ -382,8 +382,10 @@ Clang-Tidy Checks
    :doc:`readability-named-parameter <readability/named-parameter>`, "Yes"
    :doc:`readability-non-const-parameter <readability/non-const-parameter>`, "Yes"
    :doc:`readability-operators-representation <readability/operators-representation>`, "Yes"
+   :doc:`readability-prevent-ibex-doublemath-sametime <readability/prevent-ibex-doublemath-sametime>`,
+   :doc:`readability-prevent-ibex-float-math-in-same-line <readability/prevent-ibex-float-math-in-same-line>`, "Yes"
    :doc:`readability-prevent-using-ibex-check <readability/prevent-using-ibex-check>`,
-   :doc:`readability-prevent-using-ibex <readability/prevent-using-ibex>`, "Yes"
+   :doc:`readability-prevent-using-ibex <readability/prevent-using-ibex>`,
    :doc:`readability-qualified-auto <readability/qualified-auto>`, "Yes"
    :doc:`readability-redundant-access-specifiers <readability/redundant-access-specifiers>`, "Yes"
    :doc:`readability-redundant-casting <readability/redundant-casting>`, "Yes"

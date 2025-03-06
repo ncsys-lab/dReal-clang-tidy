@@ -23,6 +23,7 @@ add_clang_library(clangTidyReadabilityModule STATIC
   IdentifierLengthCheck.cpp
   IdentifierNamingCheck.cpp
   ImplicitBoolConversionCheck.cpp
+  PreventIbexFloatMathInSameLineCheck.cpp
   PreventUsingIbexCheck.cpp
   RedundantInlineSpecifierCheck.cpp
   InconsistentDeclarationParameterNameCheck.cpp
