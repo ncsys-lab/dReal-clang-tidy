@@ -40,7 +40,7 @@ void PreventIbexFloatMathInSameLineCheck::registerMatchers(MatchFinder *Finder) 
 }
 
 void PreventIbexFloatMathInSameLineCheck::check(const MatchFinder::MatchResult &Result) {
-    if (const auto *Using = Result.Nodes.getNodeAs<UsingDecl>("overcompilatedLine")) {
+    if (const auto *Using = Result.Nodes.getNodeAs<UsingDecl>("overcomplicatedLine")) {
         diag(Using->getLocation(), "No float math inside an ibex call"
              "Please avoid doing ibex calls and float math simultaneously");
     }

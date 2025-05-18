@@ -9,7 +9,7 @@ ninja -C build clang-tidy
 ```
 
 And then compile the dReal-Cmake codebase again (from its root)  
-``` make -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .```
+```cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .```
 
 Now we just need to add clang-tidy to PATH so that run-clang-tidy.py will use the correct binary.  
 You might need to modify these commands a little since I'm using my absolute path but your path should
@@ -22,10 +22,15 @@ clang-tidy --version
 ```
 
 And then the final command (from `/dReal-Cmake/`)   
-```python3 ~/CLionProjects/dReal-clang-tidy/llvm-project/clang-tools-extra/clang-tidy/tool/run-clang-tidy.py -checks='-*,readability-prevent-using-ibex,readability-prevent-ibex-float-math-in-same-line'```
+```
+python3 ~/CLionProjects/dReal-clang-tidy/llvm-project/clang-tools-extra/clang-tidy/tool/run-clang-tidy.py
+```
+(I put a .clang-tidy file in the root dir so the proper checks should be enabled default)
 
-For the future I will make a .clang-tidy file so that the clang-tidy will just use the checks enabled by that file, so  
-that the runcommand is one term instead of an endless line.
+
+## TODO
+
+Fix the compiler errors from `#include "gaol/gaol.h" as that clogs the console output from the clang-tidy check right now
 
 ### For developing new checks
 
@@ -34,3 +39,4 @@ From llvm-project
 cd clang-tools-extra/
 clang-tidy/add_new_check.py readability prevent-using-ibex
 ```
+
