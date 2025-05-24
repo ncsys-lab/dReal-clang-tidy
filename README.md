@@ -30,7 +30,7 @@ python3 ~/CLionProjects/dReal-clang-tidy/llvm-project/clang-tools-extra/clang-ti
 
 ## TODO
 
-Fix the compiler errors from `#include "gaol/gaol.h" as that clogs the console output from the clang-tidy check right now
+Fix the compiler errors from `#include "gaol/gaol.h"` as that clogs the console output from the clang-tidy check right now
 
 ### For developing new checks
 
