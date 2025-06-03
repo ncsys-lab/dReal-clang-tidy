@@ -10,11 +10,12 @@
 #include "json.hpp"
 #include "clang/AST/AST.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
+#include "llvm/Support/CommandLine.h"
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 #include "clang/Frontend/FrontendActions.h"
 #include "clang/Frontend/CompilerInstance.h"
-#include "llvm/Support/CommandLine.h"
+
 
 using namespace clang;
 using namespace clang::tooling;
@@ -37,9 +38,11 @@ public:
 };
 
 int main(int argc, const char **argv) {
-    llvm::cl::OptionCategory ToolCategory("function-finder");
-    CommonOptionsParser OptionsParser(argc, argv, ToolCategory);
+    llvm::cl::OptionCategory ToolCategory("first-pass");
+    auto ExpectedParser = CommonOptionsParser::create(argc, argv, ToolCategory);
+	auto& OptionsParser = ExpectedParser.get();
     ClangTool Tool(OptionsParser.getCompilations(), OptionsParser.getSourcePathList());
+
 
     // Set up matcher for all function declarations (excluding implicit ones)
     FunctionNameCollector collector;

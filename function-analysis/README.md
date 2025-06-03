@@ -9,4 +9,4 @@ mkdir build
 cd build
 cmake ..
 make VERBOSE=1
-
+./first_pass
