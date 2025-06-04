@@ -1,3 +1,9 @@
+# Information
+
+- The static analysis tool and its documentation is in the `/function-analysis` folder
+
+- The rest of this readme is devoted to the clang-tidy checks that ensure the codebase has the proper syntax such that the static analysis tool can properly anaylze the code and catch errors
+
 ## Running locally
 
 Clone this repo into the folder containing dReal.  
@@ -39,4 +45,3 @@ From llvm-project
 cd clang-tools-extra/
 clang-tidy/add_new_check.py readability prevent-using-ibex
 ```
-
