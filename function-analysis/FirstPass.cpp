@@ -17,48 +17,130 @@
 using namespace clang;
 using namespace clang::tooling;
 using namespace clang::ast_matchers;
-using json = nlohmann::json;
+using json = nlohmann::ordered_json;
 
-// Helper structure to store match information
-struct MatchInfo {
-    bool hasIbexCall = false;
-    std::set<std::string> locations; // Source locations or function names where matches occur
+struct MatchEntry {
+    std::string type; // "ibex", "double", "setroundupper", "setroundlower"
+    int line;
 };
 
-// Matcher callback for matching calls to ibex functions with arithmetic arguments
+struct MatchInfo {
+    std::string funcName;
+    std::string fileName;
+    int funcDefLine = -1;
+    std::vector<MatchEntry> matches;
+};
+
 class Write_Solved : public MatchFinder::MatchCallback {
 public:
-    std::map<std::string, MatchInfo> functionMatches; // Track matches per function
+    std::map<std::string, MatchInfo> functionMatches;
 
     virtual void run(const MatchFinder::MatchResult &Result) override {
+        const FunctionDecl *enclosingFunc = nullptr;
+        const Stmt *matchedStmt = nullptr;
+        const Decl *matchedDecl = nullptr;
+        std::string matchType;
+
         if (const CallExpr *call = Result.Nodes.getNodeAs<CallExpr>("ibexCall")) {
-            const FunctionDecl *callee = call->getDirectCallee();
-            if (callee) {
-                std::string funcName = callee->getNameAsString();
-                functionMatches[funcName].hasIbexCall = true;
-                // Optionally, add location info for each match
-                SourceManager &SM = *Result.SourceManager;
-                SourceLocation Loc = call->getBeginLoc();
-                if (Loc.isValid()) {
-                    std::string locStr = SM.getFilename(Loc).str() + ":" +
-                                        std::to_string(SM.getSpellingLineNumber(Loc));
-                    functionMatches[funcName].locations.insert(locStr);
+            matchedStmt = call;
+            matchType = "ibex";
+        } else if (const VarDecl *var = Result.Nodes.getNodeAs<VarDecl>("floatMath")) {
+            matchedDecl = var;
+            matchType = "double";
+        } else if (const CallExpr *call = Result.Nodes.getNodeAs<CallExpr>("SetUpward")) {
+            matchedStmt = call;
+            matchType = "setroundupper";
+        } else if (const CallExpr *call = Result.Nodes.getNodeAs<CallExpr>("SetNearest")) {
+            matchedStmt = call;
+            matchType = "setroundlower";
+        } else {
+            return;
+        }
+
+        // Find enclosing function
+        if (matchedStmt) {
+            auto parents = Result.Context->getParents(*matchedStmt);
+            for (const auto &parent : parents) {
+                if (const FunctionDecl *fd = parent.get<FunctionDecl>()) {
+                    enclosingFunc = fd;
+                    break;
+                }
+            }
+        } else if (matchedDecl) {
+            auto parents = Result.Context->getParents(*matchedDecl);
+            for (const auto &parent : parents) {
+                if (const FunctionDecl *fd = parent.get<FunctionDecl>()) {
+                    enclosingFunc = fd;
+                    break;
                 }
             }
         }
+        if (!enclosingFunc) return;
+
+        SourceManager &SM = *Result.SourceManager;
+        std::string fileName = SM.getFilename(enclosingFunc->getLocation()).str();
+        std::string funcName = enclosingFunc->getNameAsString();
+        int funcLine = SM.getSpellingLineNumber(enclosingFunc->getLocation());
+
+        // Composite key: filename:functionname:line to handle overloaded functions
+        std::string key = fileName + ":" + funcName + ":" + std::to_string(funcLine);
+
+        // Store function definition location only once
+        if (functionMatches.find(key) == functionMatches.end()) {
+            functionMatches[key].funcName = funcName;
+            functionMatches[key].fileName = fileName;
+            functionMatches[key].funcDefLine = funcLine;
+        }
+
+        // Store each match with its line number
+        int line = 0;
+        if (matchedStmt)
+            line = SM.getSpellingLineNumber(matchedStmt->getBeginLoc());
+        else if (matchedDecl)
+            line = SM.getSpellingLineNumber(matchedDecl->getBeginLoc());
+
+        functionMatches[key].matches.push_back({matchType, line});
     }
 };
 
-// Helper function to configure the ibex call matcher
-void configureIbexCallMatcher(MatchFinder &finder, Write_Solved &writer) {
+void configureMatchers(MatchFinder &finder, Write_Solved &writer) {
     finder.addMatcher(
         callExpr(
-            callee(
-                functionDecl(
-                    matchesName(".*ibex.*")
+            callee(functionDecl(matchesName(".*ibex.*")))
+        ).bind("ibexCall"),
+        &writer
+    );
+    finder.addMatcher(
+        varDecl(
+            hasInitializer(
+                binaryOperator(
+                    hasLHS(hasType(realFloatingPointType())),
+                    hasRHS(hasType(realFloatingPointType()))
                 )
             )
-        ).bind("ibexCall"),
+        ).bind("floatMath"),
+        &writer
+    );
+    finder.addMatcher(
+        callExpr(
+            callee(functionDecl(matchesName("fesetround"))),
+            hasAnyArgument(
+                ignoringParenImpCasts(
+                    declRefExpr(to(varDecl(hasName("FE_UPWARD"))))
+                )
+            )
+        ).bind("SetUpward"),
+        &writer
+    );
+    finder.addMatcher(
+        callExpr(
+            callee(functionDecl(matchesName("fesetround"))),
+            hasAnyArgument(
+                ignoringParenImpCasts(
+                    declRefExpr(to(varDecl(hasName("FE_TONEAREST"))))
+                )
+            )
+        ).bind("SetNearest"),
         &writer
     );
 }
@@ -71,31 +153,46 @@ int main(int argc, const char **argv) {
 
     Write_Solved writer;
     MatchFinder finder;
+    configureMatchers(finder, writer);
 
-    // Configure matcher logic in a separate function
-    configureIbexCallMatcher(finder, writer);
-
-    // Run the tool
     int result = Tool.run(newFrontendActionFactory(&finder).get());
 
-    // Prepare JSON output with "ibex: true" and optional locations for each matched function
+    // Prepare JSON output
     json j = json::array();
     for (const auto &pair : writer.functionMatches) {
+        const MatchInfo &info = pair.second;
         json funcJson;
-        funcJson["function"] = pair.first;
-        funcJson["ibex"] = pair.second.hasIbexCall;
-        // Add locations if needed
-        if (!pair.second.locations.empty()) {
-            funcJson["locations"] = pair.second.locations;
+
+        // Combine function name and definition line
+        std::string funcDescription = info.funcName + " (defined or overloaded) at: " +
+                                      info.fileName.substr(info.fileName.find_last_of("/\\") + 1) +
+                                      " - " + std::to_string(info.funcDefLine);
+        funcJson["function"] = funcDescription;
+        // Put file at the end with indent prefix
+        funcJson["file"] = "    " + info.fileName;
+
+
+        // Sort matches by line number
+        auto sortedMatches = info.matches;
+        std::sort(sortedMatches.begin(), sortedMatches.end(),
+                  [](const MatchEntry &a, const MatchEntry &b) { return a.line < b.line; });
+
+        // Add matches in order
+        json matchArray = json::array();
+        for (const auto &m : sortedMatches) {
+            matchArray.push_back({{"type", m.type}, {"line", m.line}});
         }
+        funcJson["matches"] = matchArray;
+
+
+
         j.push_back(funcJson);
     }
 
     std::ofstream outFile("functions.json");
-    outFile << j.dump(4); // Pretty print with 4 spaces
+    outFile << j.dump(4);
     outFile.close();
 
-    std::cout << "Function matches with ibex calls written to functions.json" << std::endl;
-
+    std::cout << "Function matches written to functions.json" << std::endl;
     return result;
 }
