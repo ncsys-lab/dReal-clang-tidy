@@ -6,6 +6,7 @@ export LLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
 export Clang_DIR=/usr/lib/llvm-18/lib/cmake/clang
 ```
 
+Actual build script, which you run from this folder
 
 ```
 rm -rf build
@@ -18,8 +19,8 @@ make VERBOSE=1
 
 ## TODO: 
 
-- Verify that current matchers actually catch (dont catch) all set rounds and ibex calls
-- Verify that FirstPass actually iterates through all files in dReal 
+- Verify that current matchers actually catch all set rounds and double math
+- Make sure the clang checks actually catch all ibex aliasing
 - Then, add the logic so that it writes required pre and post conditions for every function
 - Fix this error:
 ```
