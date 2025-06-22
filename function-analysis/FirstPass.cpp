@@ -191,26 +191,24 @@ void configureMatchers(MatchFinder &finder, Write_Solved &writer) {
         ).bind("floatMathAsign"),
         &writer
     );
+	//FE_UPWARD is a macro for 0x800, so look for that instead
     finder.addMatcher(
         callExpr(
-            callee(functionDecl(matchesName("fesetround"))),
-            hasAnyArgument(
-                ignoringParenImpCasts(
-                    declRefExpr(to(varDecl(hasName("FE_UPWARD"))))
-                )
-            )
-        ).bind("SetUpward"),
+    		callee(functionDecl(matchesName("fesetround"))),
+    		hasAnyArgument(
+        		ignoringParenImpCasts(integerLiteral(equals(0x0800)))
+    		)
+		).bind("SetUpward"),
         &writer
     );
+	//FE_TONEAREST is 0x000
     finder.addMatcher(
         callExpr(
-            callee(functionDecl(matchesName("fesetround"))),
-            hasAnyArgument(
-                ignoringParenImpCasts(
-                    declRefExpr(to(varDecl(hasName("FE_TONEAREST"))))
-                )
-            )
-        ).bind("SetNearest"),
+    		callee(functionDecl(matchesName("fesetround"))),
+    		hasAnyArgument(
+        		ignoringParenImpCasts(integerLiteral(equals(0x0000)))
+    		)
+		).bind("SetNearest"),
         &writer
     );
 }
