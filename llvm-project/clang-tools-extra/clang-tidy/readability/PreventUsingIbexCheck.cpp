@@ -38,7 +38,7 @@ namespace clang::tidy::readability {
                     )
                 )
             )
-        ),
+        ).bind("usingDirective"),
     this);
 
     Finder->addMatcher(typeAliasDecl(hasType(
