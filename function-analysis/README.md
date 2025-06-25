@@ -18,10 +18,11 @@ make VERBOSE=1
 ```
 
 ## TODO: 
+- Write the block analyzer logic on paper next 
 
-- Verify that current matchers actually catch all set rounds and double math
-- Make sure the clang checks actually catch all ibex aliasing
-- Then, add the logic so that it writes required pre and post conditions for every function
+- The setround matchers don't seem to match with the round_upward funcs, and those seem to be the only call to setround. It's
+probably due to the gaol errors.
+- Double/float math matcher still have to be verified
 - Fix this error:
 ```
   /home/maxim/CLionProjects/dReal-clang-tidy/dReal-CMake/_deps/ibex-src/interval_lib_wrapper/gaol/ibex_IntervalLibWrapper.h:4:10: fatal error: 'gaol/gaol.h' file not found

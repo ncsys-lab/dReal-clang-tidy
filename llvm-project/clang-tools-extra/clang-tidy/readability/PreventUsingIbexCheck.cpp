@@ -45,6 +45,22 @@ namespace clang::tidy::readability {
         hasUnqualifiedDesugaredType(recordType(hasDeclaration(
           cxxRecordDecl(matchesName(".*ibex.*"))))))).bind("alias"),
       this);
+
+	Finder->addMatcher(
+        callExpr(
+    		callee(functionDecl(matchesName("round_upward")))
+
+		).bind("SetUpward"),
+        this
+    );
+
+    Finder->addMatcher(
+        callExpr(
+    		callee(functionDecl(matchesName("round_nearest")))
+
+		).bind("SetNearest"),
+        this
+    );
   }
 
   void PreventUsingIbexCheck::check(const MatchFinder::MatchResult &Result) {
@@ -61,6 +77,16 @@ namespace clang::tidy::readability {
     if (const auto *Alias = Result.Nodes.getNodeAs<TypeAliasDecl>("alias")) {
       diag(Alias->getLocation(), "Type alias for ibex types is not allowed. "
            "Directly reference all ibex types.");
+    }
+
+	if (const auto *Alias = Result.Nodes.getNodeAs<TypeAliasDecl>("SetUpward")) {
+      diag(Alias->getLocation(), "Set call "
+           "test");
+    }
+
+	if (const auto *Alias = Result.Nodes.getNodeAs<TypeAliasDecl>("SetNearest")) {
+      diag(Alias->getLocation(), "Set call "
+           "test");
     }
   }
 

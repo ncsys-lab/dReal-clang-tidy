@@ -191,6 +191,8 @@ void configureMatchers(MatchFinder &finder, Write_Solved &writer) {
         ).bind("floatMathAsign"),
         &writer
     );
+
+    //these matchers are outdated
 	//FE_UPWARD is a macro for 0x800, so look for that instead
     finder.addMatcher(
         callExpr(
@@ -211,6 +213,195 @@ void configureMatchers(MatchFinder &finder, Write_Solved &writer) {
 		).bind("SetNearest"),
         &writer
     );
+}
+
+std::string roundingModeToString(int mode) {
+    switch(mode) {
+        case 0: return "Nearest";
+        case 1: return "Upper";
+        case 2: return "Not Set";
+        default: return "Unknown";
+    }
+}
+
+
+// I forgot which is which and assumed upper for ibex and nearest for double math
+json analyzeFunctionRoundingModes(const std::map<std::string, MatchInfo>& functionMatches) {
+    json analysisResults = json::array();
+
+    for (const auto &pair : functionMatches) {
+        const MatchInfo &info = pair.second;
+
+        json funcAnalysis;
+        funcAnalysis["function"] = info.funcName;
+        funcAnalysis["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
+        funcAnalysis["line"] = info.funcDefLine;
+
+        // Count match types
+        bool hasIbex = false;
+        bool hasDouble = false;
+
+        for (const auto &match : info.matches) {
+            if (match.type == "ibexCall") {
+                hasIbex = true;
+            } else if (match.type == "floatMath" || match.type == "floatMathDec" || match.type == "floatMathAsign") {
+                hasDouble = true;
+            }
+        }
+
+        // Case 1: No matches
+        if (info.matches.empty()) {
+            funcAnalysis["pre_condition"] = "No Requirement";
+            funcAnalysis["post_condition"] = "Not Set";
+            analysisResults.push_back(funcAnalysis);
+            continue;
+        }
+
+        // Case 2: Ibex match and no double match
+        if (hasIbex && !hasDouble) {
+            // Look for setRound calls before ibex
+            bool hasSetRoundUpper = false;
+            bool hasSetRoundNearest = false;
+
+            // Find first ibex match line
+            int firstIbexLine = INT_MAX;
+            for (const auto &match : info.matches) {
+                if (match.type == "ibexCall" && match.line < firstIbexLine) {
+                    firstIbexLine = match.line;
+                }
+            }
+
+            // Check for rounding mode sets before first ibex
+            for (const auto &match : info.matches) {
+                if (match.line < firstIbexLine) {
+                    if (match.type == "setroundupper") {
+                        hasSetRoundUpper = true;
+                    } else if (match.type == "setroundlower") {
+                        hasSetRoundNearest = true;
+                    }
+                }
+            }
+
+            if (hasSetRoundUpper) {
+                funcAnalysis["pre_condition"] = "No Requirement";
+                funcAnalysis["post_condition"] = "Upper";
+            } else if (hasSetRoundNearest) {
+                funcAnalysis["error"] = "setRoundNearest before ibex match - this cannot be allowed!";
+                funcAnalysis["pre_condition"] = "Error";
+                funcAnalysis["post_condition"] = "Error";
+            } else {
+                funcAnalysis["pre_condition"] = "Upper";
+                funcAnalysis["post_condition"] = "Upper";
+            }
+        }
+        // Case 3: Double and no ibex
+        else if (hasDouble && !hasIbex) {
+            // Look for setRound calls before double math
+            bool hasSetRoundUpper = false;
+            bool hasSetRoundNearest = false;
+
+            // Find first double match line
+            int firstDoubleLine = INT_MAX;
+            for (const auto &match : info.matches) {
+                if ((match.type == "floatMath" || match.type == "floatMathDec" || match.type == "floatMathAsign")
+                    && match.line < firstDoubleLine) {
+                    firstDoubleLine = match.line;
+                }
+            }
+
+            // Check for rounding mode sets before first double
+            for (const auto &match : info.matches) {
+                if (match.line < firstDoubleLine) {
+                    if (match.type == "setroundupper") {
+                        hasSetRoundUpper = true;
+                    } else if (match.type == "setroundlower") {
+                        hasSetRoundNearest = true;
+                    }
+                }
+            }
+
+            if (hasSetRoundUpper) {
+                funcAnalysis["error"] = "setRoundUpper before double match - this cannot be allowed!";
+                funcAnalysis["pre_condition"] = "Error";
+                funcAnalysis["post_condition"] = "Error";
+            } else if (hasSetRoundNearest) {
+                funcAnalysis["pre_condition"] = "No Requirement";
+                funcAnalysis["post_condition"] = "Nearest";
+            } else {
+                funcAnalysis["pre_condition"] = "Nearest";
+                funcAnalysis["post_condition"] = "Nearest";
+            }
+        }
+        // Case 4: Both double and ibex
+        else if (hasDouble && hasIbex) {
+            // 0 means nearest, 1 means upper, 2 means not set
+            int requiredRoundingMode = 2; // rrm
+            int currentRoundingMode = 2;  // crm
+            bool requiredSet = false;
+            bool errorOccurred = false;
+            json warnings = json::array();
+
+            // Sort matches by line number
+            auto sortedMatches = info.matches;
+            std::sort(sortedMatches.begin(), sortedMatches.end(),
+                     [](const MatchEntry &a, const MatchEntry &b) { return a.line < b.line; });
+
+            // Process matches in order
+            for (const auto &match : sortedMatches) {
+                if (errorOccurred) break;
+
+                if (match.type == "setroundupper") {
+                    currentRoundingMode = 1;
+                    requiredSet = true;
+                } else if (match.type == "setroundlower") {
+                    currentRoundingMode = 0;
+                    requiredSet = true;
+                } else if (match.type == "ibexCall") {
+                    if (currentRoundingMode == 2) {
+                        if (!requiredSet) {
+                            requiredRoundingMode = 1;
+                            requiredSet = true;
+                        }
+                        currentRoundingMode = 1;
+                    } else if (currentRoundingMode == 0) {
+                        funcAnalysis["error"] = "ibex was called with an incorrect rounding mode (line " + std::to_string(match.line) + ")";
+                        errorOccurred = true;
+                        break;
+                    }
+                    // If currentRoundingMode == 1, ibex is called correctly, so crm stays 1
+                } else if (match.type == "floatMath" || match.type == "floatMathDec" || match.type == "floatMathAsign") {
+                    if (currentRoundingMode == 2) {
+                        if (!requiredSet) {
+                            requiredRoundingMode = 0;
+                            requiredSet = true;
+                        }
+                        currentRoundingMode = 0;
+                    } else if (currentRoundingMode == 1) {
+                        funcAnalysis["error"] = "Double math with upper rounding mode - this cannot be allowed! (line " + std::to_string(match.line) + ")";
+                        errorOccurred = true;
+                        break;
+                    }
+                    // If currentRoundingMode == 0, double math is done correctly, so crm stays 0
+                }
+            }
+
+            if (!errorOccurred) {
+                funcAnalysis["pre_condition"] = roundingModeToString(requiredRoundingMode);
+                funcAnalysis["post_condition"] = roundingModeToString(currentRoundingMode);
+            } else {
+                funcAnalysis["pre_condition"] = "Error";
+                funcAnalysis["post_condition"] = "Error";
+            }
+
+            if (!warnings.empty()) {
+                funcAnalysis["warnings"] = warnings;
+            }
+        }
+
+        analysisResults.push_back(funcAnalysis);
+    }
+
+    return analysisResults;
 }
 
 int main(int argc, const char **argv) {
@@ -260,10 +451,22 @@ int main(int argc, const char **argv) {
         j.push_back(funcJson);
     }
 
-    std::ofstream outFile("functions.json");
+    std::ofstream outFile("dump.json");
     outFile << j.dump(4);
     outFile.close();
 
-    std::cout << "Function matches written to functions.json" << std::endl;
+    std::cout << "Function matches written to dump.json" << std::endl;
+
+    std::cout << "Now doing function analysis" << std::endl;
+
+    // Add the new function analysis logic and write to functions.json
+    json analysisResults = analyzeFunctionRoundingModes(writer.functionMatches);
+
+    std::ofstream functionsFile("functions.json");
+    functionsFile << analysisResults.dump(4);
+    functionsFile.close();
+
+    std::cout << "Function analysis written to functions.json" << std::endl;
+
     return result;
 }

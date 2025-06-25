@@ -28,11 +28,11 @@ clang-tidy --version
 ```
 
 And then the final command (from `/dReal-Cmake/`)   
-(will switch to relative path later)
+_(relative paths didnt work for some reason)_
 ```
  python3 ~/CLionProjects/dReal-clang-tidy/llvm-project/clang-tools-extra/clang-tidy/tool/run-clang-tidy.py -header-filter='.*' -config-file=/home/maxim/CLionProjects/dReal-clang-tidy/.clang-tidy
 ```
-(I put a .clang-tidy file in the root dir so the proper checks should be enabled default)
+_(I put a .clang-tidy file in the root dir so the proper checks should be enabled default)_
 
 
 ## TODO
