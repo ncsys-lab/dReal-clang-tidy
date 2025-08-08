@@ -15,14 +15,20 @@ ninja -C build clang-tidy
 ```
 
 And then compile the dReal-Cmake codebase again (from its root)  
-```cmake -DCMAKE_EXPORT_COMPILE_COMMANDS=ON .```
+```
+mkdir build
+cd build
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+cmake --build ./ -j16 
+```
 
 Now we just need to add clang-tidy to PATH so that run-clang-tidy.py will use the correct binary.  
 You might need to modify these commands a little since I'm using my absolute path but your path should
 be relatively similar.  
-```export PATH=$PATH:/home/maxim/CLionProjects/dReal-clang-tidy/llvm-project/build/bin```  
-Reload the terminal and then double check that it worked:
+
+And reload the terminal and then double check that it worked:
 ```
+export PATH=$PATH:/home/maxim/CLionProjects/dReal-clang-tidy/llvm-project/build/bin
 source ~/.bashrc
 clang-tidy --version
 ```
