@@ -6,84 +6,82 @@ These are the most important datapoints regarding functions:
 - **Incoming-Rounding-Mode:** List of observed incoming round modes
 - **Output-Rounding-Mode:** Self-explanatory
 
-## 1. First Pass
+## 1. First Pass (Static Analysis)
+   The first pass performs static code analysis using Clang AST matchers to identify and categorize functions. 
+   
+### a. Primary Nodes (Functions with Double Math and/or Ibex Calls)
+   These are functions that directly perform floating-point operations or call Ibex interval arithmetic functions. They form the foundation of the analysis since their rounding mode requirements are deterministic. 
+   
+**Output:** `PrimaryFunctions.json`
 
-This functions has 2 different targets:
+- Contains pre-requirement and output-rounding-mode for each primary function
+- Reports any internal contradictions (e.g., ibex calls with incorrect rounding modes)
+- Uses line-by-line analysis to detect conflicts within function bodies
 
-### a. Primary Nodes _(Functions with Double Math and/or Ibex Calls)_
+**Detection Logic:**
 
+* Ibex Functions: Require "Upper" rounding mode
+* Double Math: Requires "Nearest" rounding mode
+* Rounding Mode Setters: fesetround() calls that change the current mode
+* Contradictions: When incompatible operations occur in sequence
 
-These functions/nodes will then impact the pre-requirement and output-rounding-modes for all functions that call this one.
+### b. All Nodes (Complete Function Tracking)
+Captures the complete function call graph for dependency analysis.
 
-**Logic:**
+**Outputs:**
 
-First pass will log these into a file called _PrimaryFunctions.json_ which stores the pre-requirement
-and output-rounding-modes of these functions
-and reports if there are any contradictions. Logic on how it calculates pre and output data is in the file itself.
+* `functionsFull.json:` Complete list of function calls with line numbers (duplicates included)
+* `functionsParentList.json`: Unique list of parent functions for each function
 
-### b. All nodes
+Purpose: Provides the complete call graph needed for topological sorting and dependency resolution.
+### 2. Graph-Solver (Dependency Analysis)
 
+The graph solver propagates rounding mode requirements through the function call graph using topological sorting.
 
-Create _functionsFull.json_ and _functionsParentList.json_ 
+#### Internal Data Structures
 
-**Logic:**
+**FuncGraph** (`std::map<std::string, FuncNode>`)
+- Dictionary of all function nodes indexed by function name
+- Each node contains complete dependency and requirement information
 
-First pass will log these into a file called _functions.json_ which stores each function along with an itemized list
-of all functions calls _(duplicates included)_ per function, and logs the unordered unique list of functions calls per
-function into _functionsParentList.json_.
+**FuncNode Properties**:
+- `solved`: Boolean indicating if analysis is complete
+- `parents`: Functions called by this function (dependencies)
+- `children`: Functions that call this function
+- `orderedCalls`: Chronologically ordered function calls with line numbers
+- `error`: Detailed error message if contradictions found
+- `preRequirement`: Required input rounding mode
+- `incomingRoundingMode`: Actual rounding modes from parent functions
+- `outputRoundingMode`: Final rounding mode after execution
 
+**FuncQueue** (`std::queue<std::string>`)
+- Queue of functions ready for analysis (all dependencies resolved)
 
+#### Analysis Algorithm
 
+**Initialization**:
+1. Load primary functions from `PrimaryFunctions.json` as initially solved
+2. Load complete call sequences from `functionsFull.json`
+3. Build dependency graph from `functionsParentList.json`
+4. Initialize queue with leaf functions and primary functions
 
-## 2. Graph-Solver  
+**Sequential Analysis**:
+1. Process functions in dependency order using topological sorting
+2. For each function, simulate execution through its ordered call sequence
+3. Track rounding mode changes step-by-step
+4. Detect contradictions when function calls require incompatible modes
 
-**Parents in this context**: functions that are called inside the given function. They are parents
-because they have to be solved in order for the child node/function to be evaluated.
+**Contradiction Detection**:
+- **Call Sequence Analysis**: Simulates actual execution order
+- **Mode Compatibility**: Ensures each function call receives correct rounding mode
+- **Line-Level Precision**: Reports exact source locations of conflicts
+- **Propagation Tracking**: Identifies how errors cascade through call chains
 
---- 
-Internal Datastructure: **FuncGraph**
-
-Each node represents a function.
-- Node Properties:
-  - **Solved**(bool): All parents solved and then this node was solved. Pre and post conditions are final
-  - **Parents** ([strings]): list of parent function names
-  - **Children** ([strings]): list of children function names
-  - **Error**(str): A contradiction was found if str is not "No"
-  - **Pre-Requirement:** Rounding mode that this node requires
-  - **Incoming-Rounding-Mode:** List of observed incoming round modes
-  - **Output-Rounding-Mode:** Self-explanatory  
-
-
-Internal Datastructure: **FuncDictionary**
-
-Dictionary of all nodes in FuncGraph by function name
-
-Internal Datastructure: **FuncQueue**
-
-A queue of functions that have all their parents solved
-
----
-Helper function: **Graph-Creator**  
-
-**Logic:**  
-
-Traverses _PrimaryFunctions.json_ first to make a set _initialSolvedFunctions_.  
-Then, traverses _functionsParentList.json_ and:
-- **Creates a node** for each function and add it to the graph
-- **Adds node to parent's child list** via FuncDictionary
-- **Add node pointer to FuncQueue** if node doesn't have parents(no parents in _functionsParentList_) or is in _initialSolvedFunctions_
-
-
----
-
-**Main function:**
-
-Iterate through FuncQueue and apply logic
-
-**Logic:**
-
-TBD.  
-Change node to Solved when done and add its children to FuncQueue if the child's other parents are solved
+**Output**: `GraphSolverResults.json`
+- Complete analysis results for all functions
+- Detailed error reporting with line numbers
+- Dependency relationships for debugging
+- Final rounding mode requirements for each function
 
 ---
 ## 3. Running Locally
@@ -112,11 +110,9 @@ If you encounter this error just ask Kunal:
   4 | #include "gaol/gaol.h"
 ```
 
-## 4. TODO: 
-- Finish updating all logic
-  - figure how and when to log the incoming-rounding-mode of functions
-  - finish Graph-Solver main logic
-  - Update First Pass based on new plan
-- Implement logic
+## 4. TODO:
+- Test new versions
+- Deciding to add incomingRoundingMode tracking, since it's unnecessary for current logic
+- Test that clangtidy actually catches inline
 - Double/float math matcher still have to be verified
 - Make a python file or bash script that runs everything in the right order

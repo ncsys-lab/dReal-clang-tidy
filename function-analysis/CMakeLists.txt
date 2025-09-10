@@ -16,6 +16,7 @@ message(STATUS "Using ClangConfig.cmake in: ${Clang_DIR}")
 
 # Your source file(s)
 add_executable(first_pass FirstPass.cpp)
+add_executable(graph_solver GraphSolver.cpp)
 
 target_include_directories(first_pass
         PRIVATE

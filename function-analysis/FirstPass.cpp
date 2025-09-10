@@ -5,6 +5,7 @@
 #include <string>
 #include <map>
 #include <set>
+#include <algorithm>
 #include "json.hpp"
 #include "clang/AST/AST.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
@@ -24,11 +25,17 @@ struct MatchEntry {
     int line;
 };
 
+struct FunctionCallEntry {
+    std::string calledFunction;
+    int line;
+};
+
 struct MatchInfo {
     std::string funcName;
     std::string fileName;
     int funcDefLine = -1;
     std::vector<MatchEntry> matches;
+    std::vector<FunctionCallEntry> functionCalls; // All function calls within this function
 };
 
 class Write_Solved : public MatchFinder::MatchCallback {
@@ -60,7 +67,49 @@ public:
             return;
         }
 
-        // Now handle the specific matches
+        // Handle function calls (for tracking all function calls within functions)
+        if (const CallExpr *call = Result.Nodes.getNodeAs<CallExpr>("functionCall")) {
+            // Find enclosing function
+            const FunctionDecl *enclosingFunc = nullptr;
+            auto parents = Result.Context->getParents(*call);
+            while (!parents.empty() && !enclosingFunc) {
+                for (const auto &parent : parents) {
+                    if (const FunctionDecl *fd = parent.get<FunctionDecl>()) {
+                        enclosingFunc = fd;
+                        break;
+                    }
+                }
+                if (!enclosingFunc && !parents.empty()) {
+                    parents = Result.Context->getParents(parents[0]);
+                }
+            }
+
+            if (enclosingFunc) {
+                SourceManager &SM = *Result.SourceManager;
+                std::string fileName = SM.getFilename(enclosingFunc->getLocation()).str();
+                std::string funcName = enclosingFunc->getNameAsString();
+                int funcLine = SM.getSpellingLineNumber(enclosingFunc->getLocation());
+                std::string key = fileName + ":" + funcName + ":" + std::to_string(funcLine);
+
+                // Initialize function info if not exists
+                if (functionMatches.find(key) == functionMatches.end()) {
+                    functionMatches[key].funcName = funcName;
+                    functionMatches[key].fileName = fileName;
+                    functionMatches[key].funcDefLine = funcLine;
+                }
+
+                // Get called function name
+                if (const FunctionDecl *calledFunc = call->getDirectCallee()) {
+                    std::string calledFuncName = calledFunc->getNameAsString();
+                    int callLine = SM.getSpellingLineNumber(call->getBeginLoc());
+
+                    functionMatches[key].functionCalls.push_back({calledFuncName, callLine});
+                }
+            }
+            return;
+        }
+
+        // Now handle the specific matches for primary nodes
         const FunctionDecl *enclosingFunc = nullptr;
         const Stmt *matchedStmt = nullptr;
         const Decl *matchedDecl = nullptr;
@@ -69,9 +118,12 @@ public:
         if (const CallExpr *call = Result.Nodes.getNodeAs<CallExpr>("ibexCall")) {
             matchedStmt = call;
             matchType = "ibexCall";
-        } else if (const VarDecl *var = Result.Nodes.getNodeAs<VarDecl>("floatMath")) {
+        } else if (const VarDecl *var = Result.Nodes.getNodeAs<VarDecl>("floatMathDec")) {
             matchedDecl = var;
-            matchType = "floatMath";
+            matchType = "floatMathDec";
+        } else if (const BinaryOperator *op = Result.Nodes.getNodeAs<BinaryOperator>("floatMathAsign")) {
+            matchedStmt = op;
+            matchType = "floatMathAsign";
         } else if (const CallExpr *call = Result.Nodes.getNodeAs<CallExpr>("SetUpward")) {
             matchedStmt = call;
             matchType = "setroundupper";
@@ -139,13 +191,19 @@ public:
 };
 
 void configureMatchers(MatchFinder &finder, Write_Solved &writer) {
-	//the parent matcher that lets us capture function definitions
+    // The parent matcher that lets us capture function definitions
     finder.addMatcher(
         functionDecl(isDefinition()).bind("allFunctions"),
         &writer
     );
 
+    // Matcher for all function calls (for tracking function calls within functions)
+    finder.addMatcher(
+        callExpr().bind("functionCall"),
+        &writer
+    );
 
+    // Ibex call matcher
     finder.addMatcher(
         callExpr(
             callee(functionDecl(matchesName(".*ibex.*")))
@@ -175,8 +233,6 @@ void configureMatchers(MatchFinder &finder, Write_Solved &writer) {
     // Float math assignment matcher
     finder.addMatcher(
         binaryOperator(
-            hasOperatorName("="),
-            hasLHS(hasType(realFloatingPointType())),
             hasRHS(
                 anyOf(
                     binaryOperator(
@@ -192,25 +248,25 @@ void configureMatchers(MatchFinder &finder, Write_Solved &writer) {
         &writer
     );
 
-    //these matchers are outdated
-	//FE_UPWARD is a macro for 0x800, so look for that instead
+    // FE_UPWARD is a macro for 0x800, so look for that instead
     finder.addMatcher(
         callExpr(
-    		callee(functionDecl(matchesName("fesetround"))),
-    		hasAnyArgument(
-        		ignoringParenImpCasts(integerLiteral(equals(0x0800)))
-    		)
-		).bind("SetUpward"),
+            callee(functionDecl(matchesName("fesetround"))),
+            hasAnyArgument(
+                ignoringParenImpCasts(integerLiteral(equals(0x0800)))
+            )
+        ).bind("SetUpward"),
         &writer
     );
-	//FE_TONEAREST is 0x000
+
+    // FE_TONEAREST is 0x000
     finder.addMatcher(
         callExpr(
-    		callee(functionDecl(matchesName("fesetround"))),
-    		hasAnyArgument(
-        		ignoringParenImpCasts(integerLiteral(equals(0x0000)))
-    		)
-		).bind("SetNearest"),
+            callee(functionDecl(matchesName("fesetround"))),
+            hasAnyArgument(
+                ignoringParenImpCasts(integerLiteral(equals(0x0000)))
+            )
+        ).bind("SetNearest"),
         &writer
     );
 }
@@ -224,40 +280,36 @@ std::string roundingModeToString(int mode) {
     }
 }
 
-
-// I forgot which is which and assumed upper for ibex and nearest for double math
-json analyzeFunctionRoundingModes(const std::map<std::string, MatchInfo>& functionMatches) {
+// Analyze primary functions (functions with double math and/or ibex calls)
+json analyzePrimaryFunctions(const std::map<std::string, MatchInfo>& functionMatches) {
     json analysisResults = json::array();
 
     for (const auto &pair : functionMatches) {
         const MatchInfo &info = pair.second;
 
-        json funcAnalysis;
-        funcAnalysis["function"] = info.funcName;
-        funcAnalysis["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
-        funcAnalysis["line"] = info.funcDefLine;
-
-        // Count match types
+        // Check if this is a primary function (has ibex calls or float math)
         bool hasIbex = false;
         bool hasDouble = false;
 
         for (const auto &match : info.matches) {
             if (match.type == "ibexCall") {
                 hasIbex = true;
-            } else if (match.type == "floatMath" || match.type == "floatMathDec" || match.type == "floatMathAsign") {
+            } else if (match.type == "floatMathDec" || match.type == "floatMathAsign") {
                 hasDouble = true;
             }
         }
 
-        // Case 1: No matches
-        if (info.matches.empty()) {
-            funcAnalysis["pre_condition"] = "No Requirement";
-            funcAnalysis["post_condition"] = "Not Set";
-            analysisResults.push_back(funcAnalysis);
+        // Skip non-primary functions
+        if (!hasIbex && !hasDouble) {
             continue;
         }
 
-        // Case 2: Ibex match and no double match
+        json funcAnalysis;
+        funcAnalysis["function"] = info.funcName;
+        funcAnalysis["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
+        funcAnalysis["line"] = info.funcDefLine;
+
+        // Case 1: Ibex match and no double match
         if (hasIbex && !hasDouble) {
             // Look for setRound calls before ibex
             bool hasSetRoundUpper = false;
@@ -283,18 +335,18 @@ json analyzeFunctionRoundingModes(const std::map<std::string, MatchInfo>& functi
             }
 
             if (hasSetRoundUpper) {
-                funcAnalysis["pre_condition"] = "No Requirement";
-                funcAnalysis["post_condition"] = "Upper";
+                funcAnalysis["pre-requirement"] = "No Requirement";
+                funcAnalysis["output-rounding-mode"] = "Upper";
             } else if (hasSetRoundNearest) {
                 funcAnalysis["error"] = "setRoundNearest before ibex match - this cannot be allowed!";
-                funcAnalysis["pre_condition"] = "Error";
-                funcAnalysis["post_condition"] = "Error";
+                funcAnalysis["pre-requirement"] = "Error";
+                funcAnalysis["output-rounding-mode"] = "Error";
             } else {
-                funcAnalysis["pre_condition"] = "Upper";
-                funcAnalysis["post_condition"] = "Upper";
+                funcAnalysis["pre-requirement"] = "Upper";
+                funcAnalysis["output-rounding-mode"] = "Upper";
             }
         }
-        // Case 3: Double and no ibex
+        // Case 2: Double and no ibex
         else if (hasDouble && !hasIbex) {
             // Look for setRound calls before double math
             bool hasSetRoundUpper = false;
@@ -303,7 +355,7 @@ json analyzeFunctionRoundingModes(const std::map<std::string, MatchInfo>& functi
             // Find first double match line
             int firstDoubleLine = INT_MAX;
             for (const auto &match : info.matches) {
-                if ((match.type == "floatMath" || match.type == "floatMathDec" || match.type == "floatMathAsign")
+                if ((match.type == "floatMathDec" || match.type == "floatMathAsign")
                     && match.line < firstDoubleLine) {
                     firstDoubleLine = match.line;
                 }
@@ -322,24 +374,23 @@ json analyzeFunctionRoundingModes(const std::map<std::string, MatchInfo>& functi
 
             if (hasSetRoundUpper) {
                 funcAnalysis["error"] = "setRoundUpper before double match - this cannot be allowed!";
-                funcAnalysis["pre_condition"] = "Error";
-                funcAnalysis["post_condition"] = "Error";
+                funcAnalysis["pre-requirement"] = "Error";
+                funcAnalysis["output-rounding-mode"] = "Error";
             } else if (hasSetRoundNearest) {
-                funcAnalysis["pre_condition"] = "No Requirement";
-                funcAnalysis["post_condition"] = "Nearest";
+                funcAnalysis["pre-requirement"] = "No Requirement";
+                funcAnalysis["output-rounding-mode"] = "Nearest";
             } else {
-                funcAnalysis["pre_condition"] = "Nearest";
-                funcAnalysis["post_condition"] = "Nearest";
+                funcAnalysis["pre-requirement"] = "Nearest";
+                funcAnalysis["output-rounding-mode"] = "Nearest";
             }
         }
-        // Case 4: Both double and ibex
+        // Case 3: Both double and ibex
         else if (hasDouble && hasIbex) {
             // 0 means nearest, 1 means upper, 2 means not set
             int requiredRoundingMode = 2; // rrm
             int currentRoundingMode = 2;  // crm
             bool requiredSet = false;
             bool errorOccurred = false;
-            json warnings = json::array();
 
             // Sort matches by line number
             auto sortedMatches = info.matches;
@@ -369,7 +420,7 @@ json analyzeFunctionRoundingModes(const std::map<std::string, MatchInfo>& functi
                         break;
                     }
                     // If currentRoundingMode == 1, ibex is called correctly, so crm stays 1
-                } else if (match.type == "floatMath" || match.type == "floatMathDec" || match.type == "floatMathAsign") {
+                } else if (match.type == "floatMathDec" || match.type == "floatMathAsign") {
                     if (currentRoundingMode == 2) {
                         if (!requiredSet) {
                             requiredRoundingMode = 0;
@@ -386,15 +437,11 @@ json analyzeFunctionRoundingModes(const std::map<std::string, MatchInfo>& functi
             }
 
             if (!errorOccurred) {
-                funcAnalysis["pre_condition"] = roundingModeToString(requiredRoundingMode);
-                funcAnalysis["post_condition"] = roundingModeToString(currentRoundingMode);
+                funcAnalysis["pre-requirement"] = roundingModeToString(requiredRoundingMode);
+                funcAnalysis["output-rounding-mode"] = roundingModeToString(currentRoundingMode);
             } else {
-                funcAnalysis["pre_condition"] = "Error";
-                funcAnalysis["post_condition"] = "Error";
-            }
-
-            if (!warnings.empty()) {
-                funcAnalysis["warnings"] = warnings;
+                funcAnalysis["pre-requirement"] = "Error";
+                funcAnalysis["output-rounding-mode"] = "Error";
             }
         }
 
@@ -416,57 +463,68 @@ int main(int argc, const char **argv) {
 
     int result = Tool.run(newFrontendActionFactory(&finder).get());
 
-    // Prepare JSON output
-    json j = json::array();
+    // 1. Create PrimaryFunctions.json for functions with double math and/or ibex calls
+    json primaryAnalysis = analyzePrimaryFunctions(writer.functionMatches);
+    std::ofstream primaryFile("PrimaryFunctions.json");
+    primaryFile << primaryAnalysis.dump(4);
+    primaryFile.close();
+    std::cout << "Primary function analysis written to PrimaryFunctions.json" << std::endl;
+
+    // 2. Create functionsFull.json - all functions with their function calls (duplicates included)
+    json fullFunctions = json::array();
     for (const auto &pair : writer.functionMatches) {
         const MatchInfo &info = pair.second;
 
-		// Skip functions without any matches
-        if (info.matches.empty()) {
-            continue;
-        }
-
         json funcJson;
+        funcJson["function"] = info.funcName;
+        funcJson["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
+        funcJson["line"] = info.funcDefLine;
 
-        // Combine function name and definition line
-        std::string funcDescription = info.funcName + " (defined or overloaded) at: " +
-                                      info.fileName.substr(info.fileName.find_last_of("/\\") + 1) +
-                                      " - " + std::to_string(info.funcDefLine);
-        funcJson["function"] = funcDescription;
-        // Put file at the end with indent prefix
-        funcJson["file"] = "    " + info.fileName;
-
-        // Sort matches by line number
-        auto sortedMatches = info.matches;
-        std::sort(sortedMatches.begin(), sortedMatches.end(),
-                  [](const MatchEntry &a, const MatchEntry &b) { return a.line < b.line; });
-
-        // Add matches in order (empty array if no matches)
-        json matchArray = json::array();
-        for (const auto &m : sortedMatches) {
-            matchArray.push_back({{"type", m.type}, {"line", m.line}});
+        // Add all function calls (with duplicates)
+        json callArray = json::array();
+        for (const auto &call : info.functionCalls) {
+            callArray.push_back({{"called_function", call.calledFunction}, {"line", call.line}});
         }
-        funcJson["matches"] = matchArray;
+        funcJson["function_calls"] = callArray;
 
-        j.push_back(funcJson);
+        fullFunctions.push_back(funcJson);
     }
 
-    std::ofstream outFile("dump.json");
-    outFile << j.dump(4);
-    outFile.close();
+    std::ofstream fullFile("functionsFull.json");
+    fullFile << fullFunctions.dump(4);
+    fullFile.close();
+    std::cout << "Full function analysis written to functionsFull.json" << std::endl;
 
-    std::cout << "Function matches written to dump.json" << std::endl;
+    // 3. Create functionsParentList.json - unique list of functions called per function
+    json parentList = json::array();
+    for (const auto &pair : writer.functionMatches) {
+        const MatchInfo &info = pair.second;
 
-    std::cout << "Now doing function analysis" << std::endl;
+        json funcJson;
+        funcJson["function"] = info.funcName;
+        funcJson["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
+        funcJson["line"] = info.funcDefLine;
 
-    // Add the new function analysis logic and write to functions.json
-    json analysisResults = analyzeFunctionRoundingModes(writer.functionMatches);
+        // Create unique set of called functions
+        std::set<std::string> uniqueCalls;
+        for (const auto &call : info.functionCalls) {
+            uniqueCalls.insert(call.calledFunction);
+        }
 
-    std::ofstream functionsFile("functions.json");
-    functionsFile << analysisResults.dump(4);
-    functionsFile.close();
+        // Convert set to array
+        json uniqueCallArray = json::array();
+        for (const auto &call : uniqueCalls) {
+            uniqueCallArray.push_back(call);
+        }
+        funcJson["unique_function_calls"] = uniqueCallArray;
 
-    std::cout << "Function analysis written to functions.json" << std::endl;
+        parentList.push_back(funcJson);
+    }
+
+    std::ofstream parentFile("functionsParentList.json");
+    parentFile << parentList.dump(4);
+    parentFile.close();
+    std::cout << "Parent list analysis written to functionsParentList.json" << std::endl;
 
     return result;
 }
