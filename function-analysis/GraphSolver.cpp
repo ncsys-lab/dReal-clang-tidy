@@ -20,6 +20,8 @@ struct FunctionNode {
     std::vector<std::string> incomingRoundingModes; // Observed incoming rounding modes
     std::string outputRoundingMode = "Not Set";
     std::vector<json> orderedFunctionCalls; // For full node analysis - ordered calls with duplicates
+    std::string location = ""; // Function location/file path
+    bool isInTargetDirectory = false; // Whether function is in dReal-clang-tidy/dReal-CMake/src/
 };
 
 // Internal data structures
@@ -29,6 +31,19 @@ private:
     std::map<std::string, FunctionNode*> funcDictionary; // FuncDictionary - pointers to nodes
     std::queue<std::string> funcQueue; // FuncQueue - function names ready to be processed
     std::set<std::string> initialSolvedFunctions; // Primary functions that are pre-solved
+
+    // Helper function to check if a function is in the target directory
+    bool isInTargetDirectory(const std::string& location) {
+        if (location.empty()) return false;
+
+        // If location just shows file name (no path), it's not even in dReal-clang
+        if (location.find('/') == std::string::npos) {
+            return false;
+        }
+
+        // Check if the location contains the target path
+        return location.find("dReal-clang-tidy/dReal-CMake/src/") != std::string::npos;
+    }
 
 public:
     // Load primary functions and mark them as initially solved
@@ -43,6 +58,8 @@ public:
         file >> primaryData;
         file.close();
 
+        int errorCount = 0;
+
         for (const auto& func : primaryData) {
             std::string funcName = func["function"];
             initialSolvedFunctions.insert(funcName);
@@ -55,15 +72,26 @@ public:
             }
 
             FunctionNode& node = funcGraph[funcName];
+
+            // Extract location if available
+            if (func.contains("location")) {
+                node.location = func["location"];
+                node.isInTargetDirectory = isInTargetDirectory(node.location);
+            }
+
             node.preRequirement = func.value("pre-requirement", "Not Set");
             node.outputRoundingMode = func.value("output-rounding-mode", "Not Set");
             node.error = func.value("error", "No");
             node.solved = true;
 
-            std::cout << "Loaded primary function: " << funcName
-                      << " (pre-req: " << node.preRequirement
-                      << ", output: " << node.outputRoundingMode << ")" << std::endl;
+            // Count errors
+            if (node.error != "No") {
+                errorCount++;
+            }
         }
+
+        // Only print the count of primary nodes with errors
+        std::cout << "Primary functions with errors: " << errorCount << std::endl;
     }
 
     // Load full function data with ordered calls
@@ -90,6 +118,12 @@ public:
 
             FunctionNode& node = funcGraph[funcName];
             node.orderedFunctionCalls = func["function_calls"];
+
+            // Extract location if available
+            if (func.contains("location")) {
+                node.location = func["location"];
+                node.isInTargetDirectory = isInTargetDirectory(node.location);
+            }
         }
     }
 
@@ -117,6 +151,12 @@ public:
             }
 
             FunctionNode& node = funcGraph[funcName];
+
+            // Extract location if available
+            if (func.contains("location")) {
+                node.location = func["location"];
+                node.isInTargetDirectory = isInTargetDirectory(node.location);
+            }
 
             // Set up parents
             for (const auto& parent : func["unique_function_calls"]) {
@@ -150,10 +190,6 @@ public:
                     node.solved = true; // Mark as solved if it's a primary function
                 }
                 funcQueue.push(node.functionName);
-                std::cout << "Added to queue: " << node.functionName
-                          << " (parents: " << node.parents.size()
-                          << ", initially solved: " << (initialSolvedFunctions.count(node.functionName) ? "yes" : "no")
-                          << ")" << std::endl;
             }
         }
     }
@@ -172,6 +208,19 @@ public:
 
     // Apply contradiction logic similar to first-pass for nodes that call other functions
     void solveNode(FunctionNode& node) {
+        // Check if the function is in the target directory (but don't skip primary nodes)
+        if (!node.isInTargetDirectory && initialSolvedFunctions.count(node.functionName) == 0) {
+            // Skip logic for functions not in dReal-clang-tidy/dReal-CMake/src/
+            // Make it a default node with no requirements or logic
+            // But don't apply this to primary nodes
+            node.preRequirement = "Not Set";
+            node.outputRoundingMode = "Not Set";
+            node.error = "No";
+            node.solved = true;
+
+            return;
+        }
+
         if (node.solved || !node.orderedFunctionCalls.empty()) {
             // This is a non-primary node that calls other functions
             // Apply logic based on the rounding modes of called functions
@@ -245,10 +294,14 @@ public:
         }
 
         node.solved = true;
-        std::cout << "Solved node: " << node.functionName
-                  << " (pre-req: " << node.preRequirement
-                  << ", output: " << node.outputRoundingMode
-                  << ", error: " << node.error << ")" << std::endl;
+        // Only print node information if there's an error
+        if (node.error != "No") {
+            std::cout << "Solved node with ERROR: " << node.functionName
+                      << " (pre-req: " << node.preRequirement
+                      << ", output: " << node.outputRoundingMode
+                      << ", error: " << node.error
+                      << ", location: " << node.location << ")" << std::endl;
+        }
     }
 
     // Helper function to convert rounding mode integer to string
@@ -268,7 +321,6 @@ public:
                 FunctionNode& child = *funcDictionary[childName];
                 if (!child.solved && allParentsSolved(child)) {
                     funcQueue.push(childName);
-                    std::cout << "Added child to queue: " << childName << std::endl;
                 }
             }
         }
@@ -280,6 +332,7 @@ public:
         std::cout << "Queue size: " << funcQueue.size() << std::endl;
 
         int processedCount = 0;
+        int skippedCount = 0;
         while (!funcQueue.empty()) {
             std::string currentFunc = funcQueue.front();
             funcQueue.pop();
@@ -288,6 +341,9 @@ public:
                 FunctionNode& node = *funcDictionary[currentFunc];
 
                 if (!node.solved) {
+                    if (!node.isInTargetDirectory && initialSolvedFunctions.count(node.functionName) == 0) {
+                        skippedCount++;
+                    }
                     solveNode(node);
                     processedCount++;
                 }
@@ -298,11 +354,13 @@ public:
         }
 
         std::cout << "Solving complete. Processed " << processedCount << " nodes." << std::endl;
+        std::cout << "Skipped " << skippedCount << " nodes outside target directory." << std::endl;
     }
 
     // Output results to JSON file
     void outputResults(const std::string& filename) {
         json results = json::array();
+        json fullDump = json::array();
 
         for (const auto& pair : funcGraph) {
             const FunctionNode& node = pair.second;
@@ -315,11 +373,23 @@ public:
             nodeJson["error"] = node.error;
             nodeJson["parents_count"] = node.parents.size();
             nodeJson["children_count"] = node.children.size();
+            nodeJson["location"] = node.location;
+            nodeJson["in_target_directory"] = node.isInTargetDirectory;
 
-            // Add parent and children lists for debugging
+            // Add parent details (name and location)
             json parentArray = json::array();
-            for (const auto& parent : node.parents) {
-                parentArray.push_back(parent);
+            for (const auto& parentName : node.parents) {
+                json parentInfo;
+                parentInfo["name"] = parentName;
+
+                // Get parent location if available
+                if (funcDictionary.find(parentName) != funcDictionary.end()) {
+                    parentInfo["location"] = funcDictionary[parentName]->location;
+                } else {
+                    parentInfo["location"] = "Unknown";
+                }
+
+                parentArray.push_back(parentInfo);
             }
             nodeJson["parents"] = parentArray;
 
@@ -329,34 +399,69 @@ public:
             }
             nodeJson["children"] = childArray;
 
-            results.push_back(nodeJson);
+            // Add to full dump
+            fullDump.push_back(nodeJson);
+
+            // Only add to filtered results if node has errors or is unsolved
+            if (node.error != "No" || !node.solved) {
+                results.push_back(nodeJson);
+            }
         }
 
+        // Output filtered results (errors and unsolved only)
         std::ofstream outFile(filename);
         outFile << results.dump(4);
         outFile.close();
 
-        std::cout << "Results written to " << filename << std::endl;
+        // Output full dump
+        std::string dumpFilename = filename.substr(0, filename.find_last_of('.')) + "Dump.json";
+        std::ofstream dumpFile(dumpFilename);
+        dumpFile << fullDump.dump(4);
+        dumpFile.close();
+
+        std::cout << "Filtered results (errors/unsolved) written to " << filename << std::endl;
+        std::cout << "Full dump written to " << dumpFilename << std::endl;
     }
 
     // Print statistics
     void printStatistics() {
         int totalNodes = funcGraph.size();
-        int solvedNodes = 0;
-        int errorNodes = 0;
+        int skippedNodes = 0;
+        int targetDirNodes = 0;
+        int targetNodes = 0;
+        int solvedTargetNodes = 0;
+        int errorTargetNodes = 0;
         int primaryNodes = initialSolvedFunctions.size();
 
+        // Count different categories
         for (const auto& pair : funcGraph) {
-            if (pair.second.solved) solvedNodes++;
-            if (pair.second.error != "No") errorNodes++;
+            bool isPrimary = initialSolvedFunctions.count(pair.second.functionName) > 0;
+
+            if (!pair.second.isInTargetDirectory && !isPrimary) {
+                // Only count as skipped if it's not a primary node
+                skippedNodes++;
+            } else if (pair.second.isInTargetDirectory || isPrimary) {
+                // Count as target nodes if in target directory OR is primary
+                targetNodes++;
+                if (pair.second.solved) solvedTargetNodes++;
+                if (pair.second.error != "No") errorTargetNodes++;
+            }
+
+            if (pair.second.isInTargetDirectory) {
+                targetDirNodes++;
+            }
         }
 
         std::cout << "\n=== Graph Statistics ===" << std::endl;
-        std::cout << "Total nodes: " << totalNodes << std::endl;
+        std::cout << "Nodes skipped (outside target directory and non-primary): " << skippedNodes << std::endl;
+        std::cout << "--- Statistics for target nodes (in target directory OR primary) ---" << std::endl;
+        std::cout << "Nodes in target directory: " << targetDirNodes << std::endl;
+        std::cout << "Target nodes (target dir + primary): " << targetNodes << std::endl;
         std::cout << "Primary nodes: " << primaryNodes << std::endl;
-        std::cout << "Solved nodes: " << solvedNodes << std::endl;
-        std::cout << "Error nodes: " << errorNodes << std::endl;
-        std::cout << "Unsolved nodes: " << (totalNodes - solvedNodes) << std::endl;
+        std::cout << "Solved target nodes: " << solvedTargetNodes << std::endl;
+        std::cout << "Error target nodes: " << errorTargetNodes << std::endl;
+        std::cout << "Unsolved target nodes: " << (targetNodes - solvedTargetNodes) << std::endl;
+        std::cout << "Total nodes: " << totalNodes << std::endl;
     }
 };
 

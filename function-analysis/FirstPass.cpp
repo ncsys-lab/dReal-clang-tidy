@@ -38,6 +38,16 @@ struct MatchInfo {
     std::vector<FunctionCallEntry> functionCalls; // All function calls within this function
 };
 
+// Helper function to extract path from dReal-clang-tidy/ onwards
+std::string extractPathFromDRealClangTidy(const std::string& fullPath) {
+    size_t pos = fullPath.find("dReal-clang-tidy/");
+    if (pos != std::string::npos) {
+        return fullPath.substr(pos);
+    }
+    // If "dReal-clang-tidy/" is not found, return just the filename
+    return fullPath.substr(fullPath.find_last_of("/\\") + 1);
+}
+
 class Write_Solved : public MatchFinder::MatchCallback {
 public:
     std::map<std::string, MatchInfo> functionMatches;
@@ -306,7 +316,7 @@ json analyzePrimaryFunctions(const std::map<std::string, MatchInfo>& functionMat
 
         json funcAnalysis;
         funcAnalysis["function"] = info.funcName;
-        funcAnalysis["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
+        funcAnalysis["location"] = extractPathFromDRealClangTidy(info.fileName);
         funcAnalysis["line"] = info.funcDefLine;
 
         // Case 1: Ibex match and no double match
@@ -477,7 +487,7 @@ int main(int argc, const char **argv) {
 
         json funcJson;
         funcJson["function"] = info.funcName;
-        funcJson["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
+        funcJson["location"] = extractPathFromDRealClangTidy(info.fileName);
         funcJson["line"] = info.funcDefLine;
 
         // Add all function calls (with duplicates)
@@ -502,7 +512,7 @@ int main(int argc, const char **argv) {
 
         json funcJson;
         funcJson["function"] = info.funcName;
-        funcJson["location"] = info.fileName.substr(info.fileName.find_last_of("/\\") + 1);
+        funcJson["location"] = extractPathFromDRealClangTidy(info.fileName);
         funcJson["line"] = info.funcDefLine;
 
         // Create unique set of called functions

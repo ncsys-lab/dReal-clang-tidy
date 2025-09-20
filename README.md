@@ -20,6 +20,8 @@ mkdir build
 cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build ./ -j16 
+cd ..
+ln -s build/compile_commands.json compile_commands.json
 ```
 
 Now we just need to add clang-tidy to PATH so that run-clang-tidy.py will use the correct binary.  

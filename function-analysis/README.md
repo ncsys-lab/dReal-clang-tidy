@@ -102,6 +102,7 @@ cd build
 cmake ..
 make VERBOSE=1
 ./first_pass /home/maxim/CLionProjects/dReal-clang-tidy/dReal-CMake/src/dreal/dreal_main.cc
+./graph_solver
 ```
 
 If you encounter this error just ask Kunal:
