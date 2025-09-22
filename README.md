@@ -1,52 +1,58 @@
 # Information
 
-- The static analysis tool and its documentation is in the `/function-analysis` folder
+This repository is meant to:
 
-- The rest of this readme is devoted to the clang-tidy checks that ensure the codebase has the proper syntax such that the static analysis tool can properly anaylze the code and catch errors
+- Catch problematic lines in Dreal that perform distinct operations (ibex calls and float math) requiring two different rounding modes 
+ via custom clang-tidy checks
+
+- Analyze all functions within dReal-CMake/src to make sure that the proper rounding mode is set before and after 
+function calls, and return a breakdown of those functions in `GraphSolverResults.json` and all functions in
+`GraphSolverResultsDump.json`
+
 
 ## Running locally
 
-Clone this repo into the folder containing dReal.  
-Then we need to build the llvm binaries
-```
+Clone [dReal-CMake](https://github.com/ncsys-lab/dReal-CMake) into the root of this project  
+
+Run this script from the project root to execute the custom checks on dReal-CMake
+```bash
+# Build the llvm binaries
 cd llvm-project
 cmake -S llvm -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLLVM_ENABLE_PROJECTS="clang;clang-tools-extra" -DCLANG_TIDY_ENABLE_STATIC_ANALYZER=OFF
 ninja -C build clang-tidy
-```
-
-And then compile the dReal-Cmake codebase again (from its root)  
-```
+# And then compile the dReal-Cmake codebase again (from its root)  
+cd ..
+cd dReal-CMake
 mkdir build
 cd build
 cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
 cmake --build ./ -j16 
 cd ..
 ln -s build/compile_commands.json compile_commands.json
-```
-
-Now we just need to add clang-tidy to PATH so that run-clang-tidy.py will use the correct binary.  
-You might need to modify these commands a little since I'm using my absolute path but your path should
-be relatively similar.  
-
-And reload the terminal and then double check that it worked:
-```
-export PATH=$PATH:/home/maxim/CLionProjects/dReal-clang-tidy/llvm-project/build/bin
+cd ..
+# Now add the binary to path so that clang-tidy is attached as well
+export PATH=$PATH:./llvm-project/build/bin
 source ~/.bashrc
 clang-tidy --version
+# Now run the clang tidy checks (using a .clang-tidy folder in the root dir)
+cd dReal-CMake
+python3 ../llvm-project/clang-tools-extra/clang-tidy/tool/run-clang-tidy.py -header-filter='.*' -config-file=../.clang-tidy
+cd ..
 ```
+Once you have looked at that feedback and cleaned up the hard-to-parse lines, you can then run the static analysis tool 
+on the freshly-cleaned codebase with this script (from the project root).
 
-And then the final command (from `/dReal-Cmake/`)   
-_(relative paths didnt work for some reason)_
+```bash
+PROJECT_DIR=.
+cd function-analysis 
+rm -rf build
+mkdir build
+cd build
+cmake ..
+make VERBOSE=1
+./first_pass $PROJECT_DIR/dReal-CMake/src/dreal/dreal_main.cc
+./graph_solver
 ```
- python3 ~/CLionProjects/dReal-clang-tidy/llvm-project/clang-tools-extra/clang-tidy/tool/run-clang-tidy.py -header-filter='.*' -config-file=/home/maxim/CLionProjects/dReal-clang-tidy/.clang-tidy
-```
-_(I put a .clang-tidy file in the root dir so the proper checks should be enabled default)_
-
-
-## TODO
-
-Fix the compiler errors from `#include "gaol/gaol.h"` as that clogs the console output from the clang-tidy check right now
-
 ### For developing new checks
 
 From llvm-project

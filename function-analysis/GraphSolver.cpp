@@ -206,21 +206,8 @@ public:
         return true;
     }
 
-    // Apply contradiction logic similar to first-pass for nodes that call other functions
+    // Apply contradiction logic for nodes that call other functions
     void solveNode(FunctionNode& node) {
-        // Check if the function is in the target directory (but don't skip primary nodes)
-        if (!node.isInTargetDirectory && initialSolvedFunctions.count(node.functionName) == 0) {
-            // Skip logic for functions not in dReal-clang-tidy/dReal-CMake/src/
-            // Make it a default node with no requirements or logic
-            // But don't apply this to primary nodes
-            node.preRequirement = "Not Set";
-            node.outputRoundingMode = "Not Set";
-            node.error = "No";
-            node.solved = true;
-
-            return;
-        }
-
         if (node.solved || !node.orderedFunctionCalls.empty()) {
             // This is a non-primary node that calls other functions
             // Apply logic based on the rounding modes of called functions
@@ -332,7 +319,7 @@ public:
         std::cout << "Queue size: " << funcQueue.size() << std::endl;
 
         int processedCount = 0;
-        int skippedCount = 0;
+        int skippedCount = 0; // Keep for output formatting compatibility
         while (!funcQueue.empty()) {
             std::string currentFunc = funcQueue.front();
             funcQueue.pop();
@@ -341,9 +328,6 @@ public:
                 FunctionNode& node = *funcDictionary[currentFunc];
 
                 if (!node.solved) {
-                    if (!node.isInTargetDirectory && initialSolvedFunctions.count(node.functionName) == 0) {
-                        skippedCount++;
-                    }
                     solveNode(node);
                     processedCount++;
                 }
@@ -354,16 +338,22 @@ public:
         }
 
         std::cout << "Solving complete. Processed " << processedCount << " nodes." << std::endl;
-        std::cout << "Skipped " << skippedCount << " nodes outside target directory." << std::endl;
     }
 
-    // Output results to JSON file
+    // Output results to JSON file with separated categories
     void outputResults(const std::string& filename) {
-        json results = json::array();
         json fullDump = json::array();
+
+        // Separate categories for filtered output
+        json targetDirErrors = json::array();
+        json targetDirUnsolved = json::array();
+        json targetDirSolved = json::array();
+        json primaryErrors = json::array();
+        json primaryUnsolved = json::array();
 
         for (const auto& pair : funcGraph) {
             const FunctionNode& node = pair.second;
+            bool isPrimary = initialSolvedFunctions.count(node.functionName) > 0;
 
             json nodeJson;
             nodeJson["function"] = node.functionName;
@@ -375,6 +365,7 @@ public:
             nodeJson["children_count"] = node.children.size();
             nodeJson["location"] = node.location;
             nodeJson["in_target_directory"] = node.isInTargetDirectory;
+            nodeJson["is_primary"] = isPrimary;
 
             // Add parent details (name and location)
             json parentArray = json::array();
@@ -402,15 +393,39 @@ public:
             // Add to full dump
             fullDump.push_back(nodeJson);
 
-            // Only add to filtered results if node has errors or is unsolved
-            if (node.error != "No" || !node.solved) {
-                results.push_back(nodeJson);
+            // Categorize for filtered output
+            if (isPrimary) {
+                if (node.error != "No") {
+                    primaryErrors.push_back(nodeJson);
+                } else if (!node.solved) {
+                    primaryUnsolved.push_back(nodeJson);
+                }
+            } else if (node.isInTargetDirectory) {
+                if (node.error != "No") {
+                    targetDirErrors.push_back(nodeJson);
+                } else if (!node.solved) {
+                    targetDirUnsolved.push_back(nodeJson);
+                } else if (node.solved) {
+                    targetDirSolved.push_back(nodeJson);
+                }
             }
         }
 
-        // Output filtered results (errors and unsolved only)
+        // Create the filtered results structure
+        json filteredResults;
+        filteredResults["target_directory_nodes"] = {
+            {"errors", targetDirErrors},
+            {"unsolved", targetDirUnsolved},
+            {"solved", targetDirSolved}
+        };
+        filteredResults["primary_nodes"] = {
+            {"errors", primaryErrors},
+            {"unsolved", primaryUnsolved}
+        };
+
+        // Output filtered results
         std::ofstream outFile(filename);
-        outFile << results.dump(4);
+        outFile << filteredResults.dump(4);
         outFile.close();
 
         // Output full dump
@@ -419,65 +434,87 @@ public:
         dumpFile << fullDump.dump(4);
         dumpFile.close();
 
-        std::cout << "Filtered results (errors/unsolved) written to " << filename << std::endl;
+        std::cout << "Filtered results (separated by category) written to " << filename << std::endl;
         std::cout << "Full dump written to " << dumpFilename << std::endl;
+
+        // Print counts for each category
+        std::cout << "\n=== Filtered Results Summary ===" << std::endl;
+        std::cout << "Target directory nodes with errors: " << targetDirErrors.size() << std::endl;
+        std::cout << "Target directory nodes unsolved: " << targetDirUnsolved.size() << std::endl;
+        std::cout << "Target directory nodes solved: " << targetDirSolved.size() << std::endl;
+        std::cout << "Primary nodes with errors: " << primaryErrors.size() << std::endl;
+        std::cout << "Primary nodes unsolved: " << primaryUnsolved.size() << std::endl;
     }
 
-    // Print statistics
+    // Print statistics with separate categories
     void printStatistics() {
         int totalNodes = funcGraph.size();
-        int skippedNodes = 0;
+        int skippedNodes = 0; // Keep for output formatting compatibility
+
+        // Target directory statistics
         int targetDirNodes = 0;
-        int targetNodes = 0;
-        int solvedTargetNodes = 0;
-        int errorTargetNodes = 0;
-        int primaryNodes = initialSolvedFunctions.size();
+        int targetDirSolved = 0;
+        int targetDirErrors = 0;
+        int targetDirUnsolved = 0;
+
+        // Primary node statistics
+        int primaryNodes = 0;
+        int primarySolved = 0;
+        int primaryErrors = 0;
+        int primaryUnsolved = 0;
 
         // Count different categories
         for (const auto& pair : funcGraph) {
-            bool isPrimary = initialSolvedFunctions.count(pair.second.functionName) > 0;
+            const FunctionNode& node = pair.second;
+            bool isPrimary = initialSolvedFunctions.count(node.functionName) > 0;
 
-            if (!pair.second.isInTargetDirectory && !isPrimary) {
-                // Only count as skipped if it's not a primary node
-                skippedNodes++;
-            } else if (pair.second.isInTargetDirectory || isPrimary) {
-                // Count as target nodes if in target directory OR is primary
-                targetNodes++;
-                if (pair.second.solved) solvedTargetNodes++;
-                if (pair.second.error != "No") errorTargetNodes++;
+            // Count target directory nodes (excluding primary)
+            if (node.isInTargetDirectory && !isPrimary) {
+                targetDirNodes++;
+                if (node.solved) targetDirSolved++;
+                if (node.error != "No") targetDirErrors++;
+                if (!node.solved) targetDirUnsolved++;
             }
 
-            if (pair.second.isInTargetDirectory) {
-                targetDirNodes++;
+            // Count primary nodes
+            if (isPrimary) {
+                primaryNodes++;
+                if (node.solved) primarySolved++;
+                if (node.error != "No") primaryErrors++;
+                if (!node.solved) primaryUnsolved++;
             }
         }
 
         std::cout << "\n=== Graph Statistics ===" << std::endl;
-        std::cout << "Nodes skipped (outside target directory and non-primary): " << skippedNodes << std::endl;
-        std::cout << "--- Statistics for target nodes (in target directory OR primary) ---" << std::endl;
-        std::cout << "Nodes in target directory: " << targetDirNodes << std::endl;
-        std::cout << "Target nodes (target dir + primary): " << targetNodes << std::endl;
-        std::cout << "Primary nodes: " << primaryNodes << std::endl;
-        std::cout << "Solved target nodes: " << solvedTargetNodes << std::endl;
-        std::cout << "Error target nodes: " << errorTargetNodes << std::endl;
-        std::cout << "Unsolved target nodes: " << (targetNodes - solvedTargetNodes) << std::endl;
         std::cout << "Total nodes: " << totalNodes << std::endl;
+
+        std::cout << "\n--- Target Directory Nodes (excluding primary) ---" << std::endl;
+        std::cout << "Total target directory nodes: " << targetDirNodes << std::endl;
+        std::cout << "Solved target directory nodes: " << targetDirSolved << std::endl;
+        std::cout << "Error target directory nodes: " << targetDirErrors << std::endl;
+        std::cout << "Unsolved target directory nodes: " << targetDirUnsolved << std::endl;
+
+        std::cout << "\n--- Primary Nodes ---" << std::endl;
+        std::cout << "Total primary nodes: " << primaryNodes << std::endl;
+        std::cout << "Solved primary nodes: " << primarySolved << std::endl;
+        std::cout << "Error primary nodes: " << primaryErrors << std::endl;
+        std::cout << "Unsolved primary nodes: " << primaryUnsolved << std::endl;
     }
 };
 
 int main() {
     GraphSolver solver;
 
-    std::cout << "Loading primary functions..." << std::endl;
+    std::cout << "\n \nLoading primary functions..." << std::endl;
     solver.loadPrimaryFunctions("PrimaryFunctions.json");
 
-    std::cout << "\nLoading full functions..." << std::endl;
+    std::cout << "Loading full functions..." << std::endl;
     solver.loadFunctionsFull("functionsFull.json");
 
-    std::cout << "\nLoading parent list and building graph..." << std::endl;
+    std::cout << "Loading parent list and building graph..." << std::endl;
     solver.loadFunctionsParentList("functionsParentList.json");
 
-    std::cout << "\nSolving graph..." << std::endl;
+    //solving graph
     solver.solve();
 
     std::cout << "\nOutputting results..." << std::endl;
