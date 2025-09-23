@@ -34,7 +34,7 @@ Captures the complete function call graph for dependency analysis.
 * `functionsParentList.json`: Unique list of parent functions for each function
 
 Purpose: Provides the complete call graph needed for topological sorting and dependency resolution.
-### 2. Graph-Solver (Dependency Analysis)
+## 2. Graph-Solver (Dependency Analysis)
 
 The graph solver propagates rounding mode requirements through the function call graph using topological sorting.
 
@@ -84,36 +84,11 @@ The graph solver propagates rounding mode requirements through the function call
 - Final rounding mode requirements for each function
 
 ---
-## 3. Running Locally
-These commands are useful if it isnt compiling because you have multiple llvm versions. However I still had to end 
-up deleting llvm-19 because cmake just hated me
-```
-export LLVM_HOME=/usr/lib/llvm-18
-export LLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
-export Clang_DIR=/usr/lib/llvm-18/lib/cmake/clang
-```
 
-Actual build script, which you run from this folder
 
-```
-rm -rf build
-mkdir build
-cd build
-cmake ..
-make VERBOSE=1
-./first_pass /home/maxim/CLionProjects/dReal-clang-tidy/dReal-CMake/src/dreal/dreal_main.cc
-./graph_solver
-```
 
-If you encounter this error just ask Kunal:
-```
-  /home/maxim/CLionProjects/dReal-clang-tidy/dReal-CMake/_deps/ibex-src/interval_lib_wrapper/gaol/ibex_IntervalLibWrapper.h:4:10: fatal error: 'gaol/gaol.h' file not found
-  4 | #include "gaol/gaol.h"
-```
-
-## 4. TODO:
-- Test new versions
-- Deciding to add incomingRoundingMode tracking, since it's unnecessary for current logic
+## 3. TODO:
+- Double check all logic
 - Test that clangtidy actually catches inline
 - Double/float math matcher still have to be verified
-- Make a python file or bash script that runs everything in the right order
+

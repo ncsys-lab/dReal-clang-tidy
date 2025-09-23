@@ -10,7 +10,7 @@ function calls, and return a breakdown of those functions in `GraphSolverResults
 `GraphSolverResultsDump.json`
 
 
-## Running locally
+## 1. Running locally
 
 Clone [dReal-CMake](https://github.com/ncsys-lab/dReal-CMake) into the root of this project  
 
@@ -43,7 +43,7 @@ Once you have looked at that feedback and cleaned up the hard-to-parse lines, yo
 on the freshly-cleaned codebase with this script (from the project root).
 
 ```bash
-PROJECT_DIR=.
+PROJECT_DIR=$(pwd)  
 cd function-analysis 
 rm -rf build
 mkdir build
@@ -53,10 +53,37 @@ make VERBOSE=1
 ./first_pass $PROJECT_DIR/dReal-CMake/src/dreal/dreal_main.cc
 ./graph_solver
 ```
-### For developing new checks
+## 2. Developing new checks
 
 From llvm-project
 ``` 
 cd clang-tools-extra/
 clang-tidy/add_new_check.py readability prevent-using-ibex
 ```
+First term is the module it will be part of (easy if it's an existing one)  
+Second term is the name of the new check
+
+## 3. Debugging
+
+If you encounter this error just ask Kunal:
+```
+  /home/maxim/CLionProjects/dReal-clang-tidy/dReal-CMake/_deps/ibex-src/interval_lib_wrapper/gaol/ibex_IntervalLibWrapper.h:4:10: fatal error: 'gaol/gaol.h' file not found
+  4 | #include "gaol/gaol.h"
+```
+
+Any other questions can be directed towards me, but they're just debuggable problems in which you're using the wrong
+version of something or it can't find the right path.
+
+```bash
+export LLVM_HOME=/usr/lib/llvm-18
+export LLVM_DIR=/usr/lib/llvm-18/lib/cmake/llvm
+export Clang_DIR=/usr/lib/llvm-18/lib/cmake/clang
+```
+
+These commands are useful if it isn't compiling because you have multiple llvm versions. However,
+I just deleted llvm-19 because it was causing too many problems
+
+## 4. More Information
+
+More information on how my static analysis tool works and the logic behind it can be found in
+`./function-analysis`
