@@ -51,7 +51,6 @@ The graph solver propagates rounding mode requirements through the function call
 - `orderedCalls`: Chronologically ordered function calls with line numbers
 - `error`: Detailed error message if contradictions found
 - `preRequirement`: Required input rounding mode
-- `incomingRoundingMode`: Actual rounding modes from parent functions
 - `outputRoundingMode`: Final rounding mode after execution
 
 **FuncQueue** (`std::queue<std::string>`)
@@ -77,18 +76,21 @@ The graph solver propagates rounding mode requirements through the function call
 - **Line-Level Precision**: Reports exact source locations of conflicts
 - **Propagation Tracking**: Identifies how errors cascade through call chains
 
-**Output**: `GraphSolverResults.json`
-- Complete analysis results for all functions
-- Detailed error reporting with line numbers
-- Dependency relationships for debugging
-- Final rounding mode requirements for each function
+**Outputs**: 
+- `GraphSolverResults.json`: 
+  - Displays error, unsolved, and solved target directory nodes
+  - Displays error and unsolved primary nodes
+  - Detailed error reporting with line numbers
+  - Dependency relationships for debugging
+  - Final rounding mode requirements for each function
+- `GraphSolverResultsDump.json`
+  - Same but for all nodes, not just important ones
 
 ---
 
 
 
 ## 3. TODO:
-- Double check all logic
 - Test that clangtidy actually catches inline
 - Double/float math matcher still have to be verified
 

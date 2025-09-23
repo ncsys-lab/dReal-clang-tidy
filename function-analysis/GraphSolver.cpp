@@ -17,7 +17,6 @@ struct FunctionNode {
     std::vector<std::string> children; // Functions that call this function
     std::string error = "No";
     std::string preRequirement = "Not Set";
-    std::vector<std::string> incomingRoundingModes; // Observed incoming rounding modes
     std::string outputRoundingMode = "Not Set";
     std::vector<json> orderedFunctionCalls; // For full node analysis - ordered calls with duplicates
     std::string location = ""; // Function location/file path
@@ -319,7 +318,6 @@ public:
         std::cout << "Queue size: " << funcQueue.size() << std::endl;
 
         int processedCount = 0;
-        int skippedCount = 0; // Keep for output formatting compatibility
         while (!funcQueue.empty()) {
             std::string currentFunc = funcQueue.front();
             funcQueue.pop();
@@ -342,14 +340,24 @@ public:
 
     // Output results to JSON file with separated categories
     void outputResults(const std::string& filename) {
-        json fullDump = json::array();
-
         // Separate categories for filtered output
         json targetDirErrors = json::array();
         json targetDirUnsolved = json::array();
         json targetDirSolved = json::array();
         json primaryErrors = json::array();
         json primaryUnsolved = json::array();
+        json primarySolved = json::array();
+
+        // Categories for full dump organized by type
+        json targetDirDumpErrors = json::array();
+        json targetDirDumpUnsolved = json::array();
+        json targetDirDumpSolved = json::array();
+        json primaryDumpErrors = json::array();
+        json primaryDumpUnsolved = json::array();
+        json primaryDumpSolved = json::array();
+        json neitherDumpErrors = json::array();
+        json neitherDumpUnsolved = json::array();
+        json neitherDumpSolved = json::array();
 
         for (const auto& pair : funcGraph) {
             const FunctionNode& node = pair.second;
@@ -390,28 +398,47 @@ public:
             }
             nodeJson["children"] = childArray;
 
-            // Add to full dump
-            fullDump.push_back(nodeJson);
+            // Determine node category and status for full dump
+            bool hasError = (node.error != "No");
+            bool isSolved = node.solved;
 
-            // Categorize for filtered output
             if (isPrimary) {
-                if (node.error != "No") {
+                // Primary node
+                if (hasError) {
                     primaryErrors.push_back(nodeJson);
-                } else if (!node.solved) {
+                    primaryDumpErrors.push_back(nodeJson);
+                } else if (!isSolved) {
                     primaryUnsolved.push_back(nodeJson);
+                    primaryDumpUnsolved.push_back(nodeJson);
+                } else {
+                    // Primary solved without error
+                    primaryDumpSolved.push_back(nodeJson);
                 }
             } else if (node.isInTargetDirectory) {
-                if (node.error != "No") {
+                // Target directory node
+                if (hasError) {
                     targetDirErrors.push_back(nodeJson);
-                } else if (!node.solved) {
+                    targetDirDumpErrors.push_back(nodeJson);
+                } else if (!isSolved) {
                     targetDirUnsolved.push_back(nodeJson);
-                } else if (node.solved) {
+                    targetDirDumpUnsolved.push_back(nodeJson);
+                } else {
                     targetDirSolved.push_back(nodeJson);
+                    targetDirDumpSolved.push_back(nodeJson);
+                }
+            } else {
+                // Neither primary nor in target directory
+                if (hasError) {
+                    neitherDumpErrors.push_back(nodeJson);
+                } else if (!isSolved) {
+                    neitherDumpUnsolved.push_back(nodeJson);
+                } else {
+                    neitherDumpSolved.push_back(nodeJson);
                 }
             }
         }
 
-        // Create the filtered results structure
+        // Create the filtered results structure (same as before)
         json filteredResults;
         filteredResults["target_directory_nodes"] = {
             {"errors", targetDirErrors},
@@ -423,19 +450,37 @@ public:
             {"unsolved", primaryUnsolved}
         };
 
+        // Create the full dump structure organized by category and status
+        json fullDumpStructured;
+        fullDumpStructured["target_directory_nodes"] = {
+            {"errors", targetDirDumpErrors},
+            {"unsolved", targetDirDumpUnsolved},
+            {"solved", targetDirDumpSolved}
+        };
+        fullDumpStructured["primary_nodes"] = {
+            {"errors", primaryDumpErrors},
+            {"unsolved", primaryDumpUnsolved},
+            {"solved", primaryDumpSolved}
+        };
+        fullDumpStructured["neither_nodes"] = {
+            {"errors", neitherDumpErrors},
+            {"unsolved", neitherDumpUnsolved},
+            {"solved", neitherDumpSolved}
+        };
+
         // Output filtered results
         std::ofstream outFile(filename);
         outFile << filteredResults.dump(4);
         outFile.close();
 
-        // Output full dump
+        // Output structured full dump
         std::string dumpFilename = filename.substr(0, filename.find_last_of('.')) + "Dump.json";
         std::ofstream dumpFile(dumpFilename);
-        dumpFile << fullDump.dump(4);
+        dumpFile << fullDumpStructured.dump(4);
         dumpFile.close();
 
         std::cout << "Filtered results (separated by category) written to " << filename << std::endl;
-        std::cout << "Full dump written to " << dumpFilename << std::endl;
+        std::cout << "Full dump (structured by category and status) written to " << dumpFilename << std::endl;
 
         // Print counts for each category
         std::cout << "\n=== Filtered Results Summary ===" << std::endl;
@@ -444,12 +489,21 @@ public:
         std::cout << "Target directory nodes solved: " << targetDirSolved.size() << std::endl;
         std::cout << "Primary nodes with errors: " << primaryErrors.size() << std::endl;
         std::cout << "Primary nodes unsolved: " << primaryUnsolved.size() << std::endl;
-    }
 
+        std::cout << "\n=== Full Dump Summary ===" << std::endl;
+        std::cout << "Target directory - Errors: " << targetDirDumpErrors.size()
+                  << ", Unsolved: " << targetDirDumpUnsolved.size()
+                  << ", Solved: " << targetDirDumpSolved.size() << std::endl;
+        std::cout << "Primary nodes - Errors: " << primaryDumpErrors.size()
+                  << ", Unsolved: " << primaryDumpUnsolved.size()
+                  << ", Solved: " << primaryDumpSolved.size() << std::endl;
+        std::cout << "Neither category - Errors: " << neitherDumpErrors.size()
+                  << ", Unsolved: " << neitherDumpUnsolved.size()
+                  << ", Solved: " << neitherDumpSolved.size() << std::endl;
+    }
     // Print statistics with separate categories
     void printStatistics() {
         int totalNodes = funcGraph.size();
-        int skippedNodes = 0; // Keep for output formatting compatibility
 
         // Target directory statistics
         int targetDirNodes = 0;
